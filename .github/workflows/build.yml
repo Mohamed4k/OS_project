@@ -1,0 +1,47 @@
+name: Build Kernel and Initrd
+
+on: [push, pull_request]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Install dependencies
+      run: |
+        sudo apt update
+        sudo apt install -y clang lld qemu-system-aarch64 cpio
+
+    - name: Compile Kernel
+      run: |
+        clang --target=aarch64-linux-gnu -c boot.S -o boot.o
+        clang --target=aarch64-linux-gnu -c kernel.c -o kernel.o
+        ld.lld -T linker.ld boot.o kernel.o -o kernel.elf
+
+    - name: Build Initrd
+      run: |
+        mkdir -p initrd/{bin,sbin,etc,proc,sys,dev}
+        echo '#!/bin/sh' > initrd/init
+        echo 'echo "Hello from initrd!"' >> initrd/init
+        echo 'exec /bin/sh' >> initrd/init
+        chmod +x initrd/init
+        sudo apt install busybox
+        cp /bin/busybox initrd/bin/
+        (cd initrd/bin && for cmd in sh ls cat echo; do ln -s busybox $cmd; done)
+        cd initrd && find . | cpio -o -H newc | gzip > ../initrd.img && cd ..
+
+    - name: Test Kernel in QEMU
+      run: |
+        qemu-system-aarch64 -M virt -cpu cortex-a72 -kernel kernel.elf -initrd initrd.img -nographic -append "console=ttyAMA0"
+
+    - name: Upload Artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: kernel_and_initrd
+        path: |
+          kernel.elf
+          initrd.img
+          
